@@ -1,4 +1,8 @@
 import type p5 from 'p5';
+import { setOffRoadIntensity } from './audio/ambient';
+import { audioInit, toggleMute } from './audio/audioBus';
+import { playMenuConfirm, playMenuNav } from './audio/effects';
+import { setEngineActive, updateEngine } from './audio/engine';
 import { NUM_SEGMENTS_LAP, SEGMENT_LENGTH, updatePhysics } from './game/physics';
 import { buildRoad, lookupSegment, maintainEndlessRoad } from './game/road';
 import type { GameState } from './game/state';
@@ -24,12 +28,15 @@ export function buildSketch(state: GameState): (p: p5) => void {
     road = buildRoad(mode);
     cars = spawnInitialCars(state.playerZ);
     resetHUDState();
+    setEngineActive(true);
   };
 
   const exitToMenu = () => {
     state.screen = 'menu';
     road = null;
     cars = [];
+    setEngineActive(false);
+    setOffRoadIntensity(0);
   };
 
   return (p: p5) => {
@@ -44,42 +51,60 @@ export function buildSketch(state: GameState): (p: p5) => void {
       p.resizeCanvas(p.windowWidth, p.windowHeight);
     };
 
-    p.keyPressed = () => {
-      const code = p.keyCode;
+    const handleMenuKey = (code: number) => {
+      if (code === p.UP_ARROW || code === p.DOWN_ARROW) {
+        menuFocus = menuFocus === 0 ? 1 : 0;
+        playMenuNav();
+      } else if (code === p.ENTER || code === p.RETURN) {
+        playMenuConfirm();
+        enterGame(menuFocus === 0 ? 'endless' : 'lap');
+      }
+      // Esc on the menu is intentionally a no-op: a browser tab cannot close
+      // itself from JS, so there's nowhere to go from here.
+    };
 
-      if (state.screen === 'menu') {
-        if (code === p.UP_ARROW || code === p.DOWN_ARROW) {
-          menuFocus = menuFocus === 0 ? 1 : 0;
-        } else if (code === p.ENTER || code === p.RETURN) {
-          enterGame(menuFocus === 0 ? 'endless' : 'lap');
-        }
-        // Esc on the menu is intentionally a no-op: a browser tab cannot close
-        // itself from JS, so there's nowhere to go from here.
+    const handleGameKey = (code: number) => {
+      if (code === p.ESCAPE) {
+        playMenuNav();
+        exitToMenu();
         return;
       }
-
-      if (state.screen === 'game') {
-        if (code === p.ESCAPE) {
-          exitToMenu();
-          return;
-        }
-        // Dev-only: `]` jumps forward by 10% of a lap so the lap-mode wrap
-        // (segment 749 → 0) is verifiable in seconds instead of minutes. The
-        // import.meta.env.DEV gate is constant-folded out of the production
-        // bundle, so this binding ships only in `vite dev`.
-        if (import.meta.env.DEV && p.key === ']') {
-          state.playerZ += (NUM_SEGMENTS_LAP / 10) * SEGMENT_LENGTH;
-          state.playerSegmentIndex = Math.floor(state.playerZ / SEGMENT_LENGTH);
-        }
-        return;
+      // Dev-only: `]` jumps forward by 10% of a lap so the lap-mode wrap
+      // (segment 749 → 0) is verifiable in seconds instead of minutes. The
+      // import.meta.env.DEV gate is constant-folded out of the production
+      // bundle, so this binding ships only in `vite dev`.
+      if (import.meta.env.DEV && p.key === ']') {
+        state.playerZ += (NUM_SEGMENTS_LAP / 10) * SEGMENT_LENGTH;
+        state.playerSegmentIndex = Math.floor(state.playerZ / SEGMENT_LENGTH);
       }
+    };
 
-      // state.screen === 'finish'
+    const handleFinishKey = (code: number) => {
       if (code === p.ENTER || code === p.RETURN) {
+        playMenuConfirm();
         enterGame(state.mode);
       } else if (code === p.ESCAPE) {
+        playMenuNav();
         exitToMenu();
       }
+    };
+
+    p.keyPressed = () => {
+      // First keypress on any screen unlocks the AudioContext (browser
+      // autoplay policy). Idempotent — subsequent calls are no-ops.
+      audioInit();
+
+      // Global mute toggle. Works on every screen so the demo can be silenced
+      // mid-run without diving into a menu.
+      if (p.key === 'm' || p.key === 'M') {
+        toggleMute();
+        return;
+      }
+
+      const code = p.keyCode;
+      if (state.screen === 'menu') handleMenuKey(code);
+      else if (state.screen === 'game') handleGameKey(code);
+      else handleFinishKey(code);
     };
 
     p.draw = () => {
@@ -101,6 +126,11 @@ export function buildSketch(state: GameState): (p: p5) => void {
         updatePhysics(state, input, currentSegment.curve, dt);
         updateTraffic(state, cars, dt);
         maintainEndlessRoad(road, state.playerSegmentIndex);
+        updateEngine(state);
+      } else if (state.screen === 'finish') {
+        // physics step 9 may have just transitioned us here. Idempotent fade.
+        setEngineActive(false);
+        setOffRoadIntensity(0);
       }
 
       // Render the world for both 'game' and 'finish' screens — the finish

@@ -222,6 +222,7 @@ export function updatePhysics(
       }
       state.lap.current = lapsCompleted;
       state.lap.currentLapTime = 0;
+      HapticBus.emit({ type: 'lap_complete' });
       if (lapsCompleted >= 3) {
         state.lap.finished = true;
         state.screen = 'finish';

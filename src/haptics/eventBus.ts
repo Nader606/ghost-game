@@ -7,7 +7,8 @@ export type HapticEvent =
   | { type: 'turbo_start' }
   | { type: 'turbo_end' }
   | { type: 'off_road'; intensity: number } // 0..1
-  | { type: 'curve_load'; lateralG: number }; // 0..1, normalized centripetal magnitude
+  | { type: 'curve_load'; lateralG: number } // 0..1, normalized centripetal magnitude
+  | { type: 'lap_complete' }; // crossed start/finish; fires once per lap, including the final crossing
 
 type Listener = (e: HapticEvent) => void;
 
