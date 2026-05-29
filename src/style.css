@@ -1,0 +1,17 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #1a1a2e;
+  font-family: -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+#canvas-host {
+  position: fixed;
+  inset: 0;
+}
+
+canvas {
+  display: block;
+}
