@@ -2,7 +2,8 @@ import type p5 from 'p5';
 import { TOP_SPEED, TURBO_COOLDOWN, TURBO_DURATION } from '../game/physics';
 import type { GameState } from '../game/state';
 import { formatLapTime } from '../util/time';
-import { COLORS } from './colors';
+import { COLORS, NEON } from './colors';
+import { withGlow } from './effects/bloom';
 
 const GEAR_HOLD_TIME = 0.5; // s — debounce so the gear display doesn't flicker at boundary speeds
 const RPM_LED_COUNT = 14;
@@ -17,11 +18,33 @@ export function resetHUDState(): void {
   gearHoldTimer = 0;
 }
 
+// EMA-smoothed framerate so the dev-only readout isn't a jitter-storm. ~0.5 s
+// time-constant — slow enough to read, fast enough to respond to perf cliffs.
+let smoothedFps = 60;
+const FPS_SMOOTHING = 0.1;
+
 export function drawHUD(p: p5, state: GameState, dt: number): void {
   drawTopCenter(p, state, dt);
   drawTopLeft(p, state);
   drawTopRight(p, state);
   drawWheelIndicator(p, state);
+  if (import.meta.env.DEV) drawFpsCounter(p);
+}
+
+function drawFpsCounter(p: p5): void {
+  const instant = p.frameRate();
+  smoothedFps = smoothedFps * (1 - FPS_SMOOTHING) + instant * FPS_SMOOTHING;
+  // Colour-code so perf cliffs are obvious without reading the number.
+  let color: string;
+  if (smoothedFps >= 55) color = COLORS.hudText;
+  else if (smoothedFps >= 45) color = COLORS.rpmMid;
+  else color = COLORS.rpmHigh;
+  p.textFont('JetBrains Mono, monospace');
+  p.textAlign(p.RIGHT, p.BOTTOM);
+  p.textStyle(p.BOLD);
+  p.textSize(12);
+  p.fill(color);
+  p.text(`${Math.round(smoothedFps)} FPS`, p.width - 16, p.height - 12);
 }
 
 function drawTopCenter(p: p5, state: GameState, dt: number): void {
@@ -50,13 +73,15 @@ function drawTopCenter(p: p5, state: GameState, dt: number): void {
     p.rect(barX + i * (ledW + ledGap), barY, ledW, barH, 1.5);
   }
 
-  // Speedometer
+  // Speedometer — cyan glow per the NEON spec (digit halo, not body fill).
   p.textFont('JetBrains Mono, monospace');
   p.textAlign(p.CENTER, p.TOP);
-  p.fill(COLORS.hudText);
-  p.textStyle(p.BOLD);
-  p.textSize(56);
-  p.text(String(speedKmh).padStart(3, '0'), cx, 38);
+  withGlow(p, NEON.cyan, 5, () => {
+    p.fill(COLORS.hudText);
+    p.textStyle(p.BOLD);
+    p.textSize(56);
+    p.text(String(speedKmh).padStart(3, '0'), cx, 38);
+  });
 
   p.fill(COLORS.hudMuted);
   p.textStyle(p.NORMAL);
@@ -65,14 +90,14 @@ function drawTopCenter(p: p5, state: GameState, dt: number): void {
 
   // Gear with 0.5 s hold so the display doesn't flicker at gear-shift boundaries.
   const targetGear = Math.min(5, Math.max(1, Math.floor((state.currentSpeed / TOP_SPEED) * 5) + 1));
-  if (targetGear !== displayedGear) {
+  if (targetGear === displayedGear) {
+    gearHoldTimer = 0;
+  } else {
     gearHoldTimer += dt;
     if (gearHoldTimer >= GEAR_HOLD_TIME) {
       displayedGear = targetGear;
       gearHoldTimer = 0;
     }
-  } else {
-    gearHoldTimer = 0;
   }
 
   p.fill(COLORS.hudAccent);
@@ -146,10 +171,19 @@ function drawTopRight(p: p5, state: GameState): void {
       break;
   }
 
-  p.fill(color);
-  p.textStyle(p.BOLD);
-  p.textSize(20);
-  p.text(labelText, x, y + 14);
+  // ACTIVE turbo: stronger yellow glow per NEON spec (blur 12). Other states
+  // render flat so the visual hierarchy reads "this is the moment turbo fires."
+  const drawLabel = () => {
+    p.fill(color);
+    p.textStyle(p.BOLD);
+    p.textSize(20);
+    p.text(labelText, x, y + 14);
+  };
+  if (state.turbo.state === 'ACTIVE') {
+    withGlow(p, NEON.yellow, 6, drawLabel);
+  } else {
+    drawLabel();
+  }
 }
 
 function drawWheelIndicator(p: p5, state: GameState): void {
@@ -189,15 +223,19 @@ function label(p: p5, text: string, x: number, y: number): void {
 }
 
 function bigValue(p: p5, text: string, x: number, y: number): void {
-  p.fill(COLORS.hudText);
-  p.textStyle(p.BOLD);
-  p.textSize(24);
-  p.text(text, x, y);
+  withGlow(p, NEON.cyan, 5, () => {
+    p.fill(COLORS.hudText);
+    p.textStyle(p.BOLD);
+    p.textSize(24);
+    p.text(text, x, y);
+  });
 }
 
 function midValue(p: p5, text: string, x: number, y: number): void {
-  p.fill(COLORS.hudText);
-  p.textStyle(p.NORMAL);
-  p.textSize(17);
-  p.text(text, x, y);
+  withGlow(p, NEON.cyan, 5, () => {
+    p.fill(COLORS.hudText);
+    p.textStyle(p.NORMAL);
+    p.textSize(17);
+    p.text(text, x, y);
+  });
 }

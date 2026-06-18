@@ -37,3 +37,20 @@ export const COLORS = {
   // Finish screen
   finishOverlay: 'rgba(10, 10, 25, 0.72)',
 } as const;
+
+// Synthwave/vaporwave palette layered on top of COLORS for the NEON iteration.
+// Additive: existing render paths keep using COLORS; new effects (sun, grid,
+// bloom, particles, speed lines) reach for NEON. A future revert is one
+// import change away.
+export const NEON = {
+  pink: '#FF006E', // sun mid-band, particle warm sparks, accent glow
+  hotPink: '#FF4D9D', // bloom on rumble strips
+  orange: '#FB5607', // sun bottom
+  yellow: '#FFBE0B', // sun top, HUD active state, lap-complete accent
+  cyan: '#3DDDFC', // grid lines, HUD digit bloom
+  electricBlue: '#3A86FF', // grid alternation
+  purple: '#8338EC', // sky upper gradient
+  deepPurple: '#2A0944', // sky mid gradient
+  black: '#0B0014', // sky horizon, bg replacement
+  white: '#F0F0FF', // bloom core
+} as const;

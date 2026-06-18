@@ -13,6 +13,24 @@ import { createKeyboardAdapter } from './input/keyboard';
 import { createWebSerialAdapter } from './input/webserial';
 import { drawPlayerCar } from './render/car';
 import { COLORS } from './render/colors';
+import { drawGrid } from './render/effects/grid';
+import { drawParticles, updateParticles } from './render/effects/particles';
+import { drawScanlines } from './render/effects/scanlines';
+import { drawSpeedLines, updateSpeedLines } from './render/effects/speedLines';
+import { drawSky, drawSun } from './render/effects/sun';
+import { perfFlags, togglePerfFlag } from './render/perfFlags';
+
+// Dev-only number-key map for the perf toggles. Module-scope so the keyPressed
+// handler stays simple (the cognitive-complexity lint flags inline if-chains).
+const PERF_TOGGLE_KEYS: Record<string, keyof typeof perfFlags> = {
+  '1': 'bloom',
+  '2': 'sun',
+  '3': 'grid',
+  '4': 'scanlines',
+  '5': 'speedLines',
+  '6': 'particles',
+};
+
 import { drawHUD, resetHUDState } from './render/hud';
 import { drawMenu, type MenuFocus } from './render/menu';
 import { renderRoad } from './render/pseudo3d';
@@ -105,6 +123,16 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
         return;
       }
 
+      // Dev-only perf isolation toggles. Press 1-6 to flip an effect off/on
+      // while reading the FPS counter — points at the actual bottleneck.
+      if (import.meta.env.DEV) {
+        const flag = PERF_TOGGLE_KEYS[p.key];
+        if (flag) {
+          togglePerfFlag(flag);
+          return;
+        }
+      }
+
       const code = p.keyCode;
       if (state.screen === 'menu') handleMenuKey(code);
       else if (state.screen === 'game') handleGameKey(code);
@@ -112,14 +140,19 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
     };
 
     p.draw = () => {
-      p.background(COLORS.bg);
+      // dt computed up front so scanlines (drawn on every screen) can advance
+      // their rolling jitter even on the menu.
+      const dt = Math.min(p.deltaTime / 1000, 1 / 30);
+
+      // Sky gradient replaces the old flat p.background(COLORS.bg). Drawn on
+      // every screen so the synthwave look reads from the moment the page loads.
+      drawSky(p);
 
       if (state.screen === 'menu') {
         drawMenu(p, menuFocus);
+        if (perfFlags.scanlines) drawScanlines(p, dt);
         return;
       }
-
-      const dt = Math.min(p.deltaTime / 1000, 1 / 30);
 
       // Physics + world updates only run in 'game' screen. updatePhysics can
       // flip state.screen to 'finish' on lap 3 completion (step 9).
@@ -137,26 +170,32 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
         updateTraffic(state, cars, dt);
         maintainEndlessRoad(road, state.playerSegmentIndex);
         updateEngine(state);
+        if (perfFlags.speedLines) updateSpeedLines(state, dt, p);
+        if (perfFlags.particles) updateParticles(p, dt);
       } else if (state.screen === 'finish') {
         // physics step 9 may have just transitioned us here. Idempotent fade.
         setEngineActive(false);
         setOffRoadIntensity(0);
       }
 
-      // Render the world for both 'game' and 'finish' screens — the finish
-      // overlay sits on top so the player can see where they crossed the line.
-      if (road) {
-        renderRoad(p, state, road, cars);
-        drawPlayerCar(p);
-      }
-
-      if (state.screen === 'game') {
-        drawHUD(p, state, dt);
-      } else if (state.screen === 'finish') {
-        drawFinishScreen(p, state);
-      }
+      // Draw order: sky (done) → sun → road → grid → player → particles →
+      // speed lines → HUD/finish → scanlines. Grid AFTER road — see deviation
+      // note in render/effects/grid.ts.
+      if (road) renderWorld(p, state, road, cars);
+      if (state.screen === 'game') drawHUD(p, state, dt);
+      else if (state.screen === 'finish') drawFinishScreen(p, state);
+      if (perfFlags.scanlines) drawScanlines(p, dt);
     };
   };
+}
+
+function renderWorld(p: p5, state: GameState, road: Road, cars: TrafficCar[]): void {
+  if (perfFlags.sun) drawSun(p, state);
+  renderRoad(p, state, road, cars);
+  if (perfFlags.grid) drawGrid(p, state, road);
+  drawPlayerCar(p);
+  if (perfFlags.particles) drawParticles(p);
+  if (perfFlags.speedLines) drawSpeedLines(state, p);
 }
 
 function drawFinishScreen(p: p5, state: GameState): void {

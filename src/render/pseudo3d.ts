@@ -12,12 +12,25 @@ import { lookupSegment } from '../game/road';
 import type { GameState } from '../game/state';
 import type { ProjectedPoint, Road, Segment, TrafficCar, WallCorners } from '../util/types';
 import { drawTrafficCar } from './car';
-import { COLORS } from './colors';
+import { COLORS, NEON } from './colors';
+import { withGlow } from './effects/bloom';
 
 // FOV → cameraDepth (the "focal length" of the projection):
 //   half-FOV in radians, then cameraDepth = 1 / tan(half-FOV).
 // 100° FOV gives ≈ 0.84.
 const cameraDepth = 1 / Math.tan(((FOV / 2) * Math.PI) / 180);
+
+// Bloom on road elements is the dominant render cost — shadowBlur on canvas2D
+// is a software Gaussian over each shape's bounding box, paid once per shape
+// and not GPU-accelerated in practice. Past this segment distance, rumbles/
+// centerlines/walls shrink small enough that the halo dwarfs the geometry
+// AND costs significant per-shape blur fill. Tuned for ≥55 fps on a modern
+// laptop; if perf headroom returns this can be relaxed.
+const BLOOM_MAX_SEGMENT_DISTANCE = 12;
+const WALL_BLOOM_BLUR = 3;
+const RUMBLE_BLOOM_BLUR = 4;
+const CENTERLINE_BLOOM_BLUR = 3;
+const STARTFINISH_BLOOM_BLUR = 8;
 
 // Project a world-space point onto the screen. Returns null if the point is
 // at or behind the camera plane (caller must skip).
@@ -144,7 +157,8 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
     if (p2.screenY >= maxY) continue;
     if (p2.screenW < 1) break;
 
-    drawSegmentQuad(p, p1, p2, seg);
+    const bloomEnabled = n < BLOOM_MAX_SEGMENT_DISTANCE;
+    drawSegmentQuad(p, p1, p2, seg, bloomEnabled);
 
     // Walls bend with the road because they reuse the same nearOffsetX /
     // farOffsetX as the segment quad. Drawing walls AFTER the road quad and
@@ -173,8 +187,31 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
       p.width,
       p.height,
     );
-    if (leftWall) drawWallTrapezoid(p, leftWall, COLORS.wallLeft, COLORS.wallBorder);
-    if (rightWall) drawWallTrapezoid(p, rightWall, COLORS.wallRight, COLORS.wallBorder);
+    // Wall borders glow per the NEON palette: hotPink left, cyan right.
+    // bloomEnabled gates the shadowBlur — far walls draw the geometry but skip
+    // the expensive halo (they're too small to benefit from it).
+    if (leftWall) {
+      withGlow(
+        p,
+        NEON.hotPink,
+        WALL_BLOOM_BLUR,
+        () => {
+          drawWallTrapezoid(p, leftWall, COLORS.wallLeft, COLORS.wallBorder);
+        },
+        bloomEnabled,
+      );
+    }
+    if (rightWall) {
+      withGlow(
+        p,
+        NEON.cyan,
+        WALL_BLOOM_BLUR,
+        () => {
+          drawWallTrapezoid(p, rightWall, COLORS.wallRight, COLORS.wallBorder);
+        },
+        bloomEnabled,
+      );
+    }
 
     // Collect (don't draw) any traffic cars whose segment matches. Using this
     // segment's nearOffsetX is sufficient: cars are point-depth entities and
@@ -205,7 +242,13 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
   }
 }
 
-function drawSegmentQuad(p: p5, near: ProjectedPoint, far: ProjectedPoint, seg: Segment): void {
+function drawSegmentQuad(
+  p: p5,
+  near: ProjectedPoint,
+  far: ProjectedPoint,
+  seg: Segment,
+  bloomEnabled: boolean,
+): void {
   p.noStroke();
 
   // 1. Grass — full-width band from the far edge down to the near edge of this
@@ -234,40 +277,64 @@ function drawSegmentQuad(p: p5, near: ProjectedPoint, far: ProjectedPoint, seg: 
   p.endShape(p.CLOSE);
 
   // 3. Rumble strips — thin trapezoids just outside each road edge (12% of
-  //    road half-width). Segment 0's rumbles are accent-coloured: it's the
-  //    start/finish line for lap mode.
-  const rumbleColor =
-    seg.index === 0 ? COLORS.hudAccent : seg.index % 2 === 0 ? COLORS.rumble1 : COLORS.rumble2;
+  //    road half-width). Segment 0 is the start/finish line: bigger NEON.yellow
+  //    glow (blur 15) per spec. Regular rumbles glow at blur 8 in their own colour.
+  const isStartFinish = seg.index === 0;
+  let rumbleColor: string;
+  if (isStartFinish) rumbleColor = COLORS.hudAccent;
+  else if (seg.index % 2 === 0) rumbleColor = COLORS.rumble1;
+  else rumbleColor = COLORS.rumble2;
+  const rumbleGlowColor = isStartFinish ? NEON.yellow : rumbleColor;
+  const rumbleGlowBlur = isStartFinish ? STARTFINISH_BLOOM_BLUR : RUMBLE_BLOOM_BLUR;
   const rumbleNearW = near.screenW * 0.12;
   const rumbleFarW = far.screenW * 0.12;
 
-  p.fill(rumbleColor);
-  // Left rumble
-  p.beginShape();
-  p.vertex(near.screenX - near.screenW - rumbleNearW, near.screenY);
-  p.vertex(near.screenX - near.screenW, near.screenY);
-  p.vertex(far.screenX - far.screenW, far.screenY);
-  p.vertex(far.screenX - far.screenW - rumbleFarW, far.screenY);
-  p.endShape(p.CLOSE);
-  // Right rumble
-  p.beginShape();
-  p.vertex(near.screenX + near.screenW, near.screenY);
-  p.vertex(near.screenX + near.screenW + rumbleNearW, near.screenY);
-  p.vertex(far.screenX + far.screenW + rumbleFarW, far.screenY);
-  p.vertex(far.screenX + far.screenW, far.screenY);
-  p.endShape(p.CLOSE);
+  // Always keep bloom on the start/finish line accent (segment 0) regardless
+  // of distance — it's a one-off landmark, perf cost is bounded to ≤1 segment.
+  const rumbleBloom = bloomEnabled || isStartFinish;
+  withGlow(
+    p,
+    rumbleGlowColor,
+    rumbleGlowBlur,
+    () => {
+      p.fill(rumbleColor);
+      // Left rumble
+      p.beginShape();
+      p.vertex(near.screenX - near.screenW - rumbleNearW, near.screenY);
+      p.vertex(near.screenX - near.screenW, near.screenY);
+      p.vertex(far.screenX - far.screenW, far.screenY);
+      p.vertex(far.screenX - far.screenW - rumbleFarW, far.screenY);
+      p.endShape(p.CLOSE);
+      // Right rumble
+      p.beginShape();
+      p.vertex(near.screenX + near.screenW, near.screenY);
+      p.vertex(near.screenX + near.screenW + rumbleNearW, near.screenY);
+      p.vertex(far.screenX + far.screenW + rumbleFarW, far.screenY);
+      p.vertex(far.screenX + far.screenW, far.screenY);
+      p.endShape(p.CLOSE);
+    },
+    rumbleBloom,
+  );
 
   // 4. Dashed centre stripe — drawn on segments where index % 4 < 2 (produces
-  //    two-on, two-off dash/gap pattern).
+  //    two-on, two-off dash/gap pattern). White glow at blur 6.
   if (seg.index % 4 < 2) {
     const stripeNear = near.screenW * 0.02;
     const stripeFar = far.screenW * 0.02;
-    p.fill(COLORS.centerline);
-    p.beginShape();
-    p.vertex(near.screenX - stripeNear, near.screenY);
-    p.vertex(near.screenX + stripeNear, near.screenY);
-    p.vertex(far.screenX + stripeFar, far.screenY);
-    p.vertex(far.screenX - stripeFar, far.screenY);
-    p.endShape(p.CLOSE);
+    withGlow(
+      p,
+      NEON.white,
+      CENTERLINE_BLOOM_BLUR,
+      () => {
+        p.fill(COLORS.centerline);
+        p.beginShape();
+        p.vertex(near.screenX - stripeNear, near.screenY);
+        p.vertex(near.screenX + stripeNear, near.screenY);
+        p.vertex(far.screenX + stripeFar, far.screenY);
+        p.vertex(far.screenX - stripeFar, far.screenY);
+        p.endShape(p.CLOSE);
+      },
+      bloomEnabled,
+    );
   }
 }
