@@ -8,20 +8,24 @@ import { buildRoad, lookupSegment, maintainEndlessRoad } from './game/road';
 import type { GameState } from './game/state';
 import { startGame } from './game/state';
 import { spawnInitialCars, updateTraffic } from './game/traffic';
+import { sendTelemetry } from './haptics/serialOut';
 import { createKeyboardAdapter } from './input/keyboard';
+import { createWebSerialAdapter } from './input/webserial';
 import { drawPlayerCar } from './render/car';
 import { COLORS } from './render/colors';
 import { drawHUD, resetHUDState } from './render/hud';
 import { drawMenu, type MenuFocus } from './render/menu';
 import { renderRoad } from './render/pseudo3d';
+import type { GhostSerial } from './serial/ghostSerial';
 import { formatLapTime } from './util/time';
 import type { Road, TrafficCar } from './util/types';
 
-export function buildSketch(state: GameState): (p: p5) => void {
+export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => void {
   let menuFocus: MenuFocus = 0;
   let road: Road | null = null;
   let cars: TrafficCar[] = [];
   const keyboard = createKeyboardAdapter();
+  const yoke = createWebSerialAdapter(serial);
 
   const enterGame = (mode: 'endless' | 'lap') => {
     startGame(state, mode);
@@ -120,10 +124,16 @@ export function buildSketch(state: GameState): (p: p5) => void {
       // Physics + world updates only run in 'game' screen. updatePhysics can
       // flip state.screen to 'finish' on lap 3 completion (step 9).
       if (state.screen === 'game' && road) {
-        keyboard.update(dt);
-        const input = keyboard.read();
+        // Drive from the yoke when connected, else the keyboard mock. Menu nav
+        // stays on the keyboard (handled in p.keyPressed) regardless.
+        const driver = serial.isConnected ? yoke : keyboard;
+        driver.update(dt);
+        const input = driver.read();
         const currentSegment = lookupSegment(road, state.playerSegmentIndex);
         updatePhysics(state, input, currentSegment.curve, dt);
+        // Push continuous telemetry (speed / curve load / off-road) to the yoke;
+        // internally throttled and a no-op when disconnected.
+        sendTelemetry(serial, state, currentSegment.curve);
         updateTraffic(state, cars, dt);
         maintainEndlessRoad(road, state.playerSegmentIndex);
         updateEngine(state);

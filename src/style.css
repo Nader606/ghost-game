@@ -15,3 +15,32 @@ body {
 canvas {
   display: block;
 }
+
+/* Iteration-2 yoke connect button. Fixed top-right, above the canvas. Hidden
+   from the demo's eye once connected (turns into a green status pill). */
+#connect-controller {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  padding: 8px 14px;
+  font:
+    13px 'JetBrains Mono',
+    monospace;
+  color: #fff;
+  background: rgba(26, 26, 46, 0.85);
+  border: 1px solid #e94560;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#connect-controller:disabled {
+  border-color: #a0a0b0;
+  color: #a0a0b0;
+  cursor: not-allowed;
+}
+
+#connect-controller.connected {
+  border-color: #3ad29f;
+  color: #3ad29f;
+}

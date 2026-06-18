@@ -42,7 +42,30 @@ The project pins `p5@^1.11`, not 2.0. p5 1.x stopped getting updates at the end 
 | **Enter**       | Confirm menu choice / retry from finish  |
 | `]`             | *Dev only* — jump 750 m forward (10 % of a lap). Stripped from production builds via `import.meta.env.DEV`. |
 
-The keyboard mock integrates the steering wheel as a continuous signal (rise/return rates in [`game/physics.ts`](./src/game/physics.ts)), faithfully previewing what the rotary encoder on the Ghost yoke will produce. Swapping the input source doesn't change the game loop — see [`input/input.ts`](./src/input/input.ts).
+The keyboard mock integrates the steering wheel as a continuous signal (rise/return rates in [`game/physics.ts`](./src/game/physics.ts)), faithfully previewing what the rotary encoder on the Ghost yoke will produce. Swapping the input source doesn't change the game loop — see [`input/input.ts`](./src/input/input.ts). With the hardware yoke connected (see below), the keyboard stays as an always-available fallback.
+
+## Hardware controller — the Ghost yoke (iteration 2)
+
+The physical controller plugs into the two seams iter 1 left open: the `InputAdapter` interface (steering + buttons in) and the `HapticBus` (force-feedback + wind out). The game loop never learns whether input came from the keyboard or the yoke.
+
+**Connecting:** open the game in **Chrome or Edge on desktop** (Web Serial is Chromium-only, and the page must be `https://` or `localhost` — Vite dev is fine). Click **⚙ Connect Controller** (top-right) and pick the Arduino's port. The button turns into a green status pill; on unsupported browsers it's disabled and the game stays fully playable on keyboard.
+
+**Hardware:** Arduino UNO R4 Minima · AS5600 magnetic encoder (steering) · NEMA 17 stepper + TMC2209 driver (force-feedback wheel) · 2× DC blower fans + XY-MOS (wind) · two thumb buttons (accelerate / brake). Firmware, the full pin map, and **wiring diagrams (SVG + PDF, one per component)** live in [`firmware/ghost-yoke/`](../firmware/ghost-yoke/) and [`firmware/ghost-yoke/wiring/`](../firmware/ghost-yoke/wiring/).
+
+**Browser-side code** ([`src/serial/`](./src/serial/), [`src/input/webserial.ts`](./src/input/webserial.ts), [`src/haptics/serialOut.ts`](./src/haptics/serialOut.ts)):
+
+- **[`serial/protocol.ts`](./src/serial/protocol.ts)** — line-based ASCII wire protocol (the single source of truth, mirrored in the firmware's `Protocol.h`), plus the load-bearing left/right sign convention.
+- **[`serial/ghostSerial.ts`](./src/serial/ghostSerial.ts)** — the port manager: user-gesture `connect()`, an async read loop with a partial-line buffer + fail-safe parsing (no checksum on the link), and clean teardown on tab close.
+- **[`input/webserial.ts`](./src/input/webserial.ts)** — the hardware `InputAdapter`. The AS5600 reports an absolute angle, so there's no rise/return integration — `read()` just returns the cached snapshot.
+- **[`haptics/serialOut.ts`](./src/haptics/serialOut.ts)** — forwards discrete `HapticBus` events (collision / turbo / lap) as commands, and streams a throttled **telemetry frame** (speed / curve-load / off-road) read straight from `GameState`, since those continuous values aren't discrete events.
+
+| Direction | Frame | Drives |
+|-----------|-------|--------|
+| Yoke → game | `I <wheel> <accel> <brake>` | steering + buttons |
+| game → yoke | `T <speed> <lateral> <offroad>` (~30 Hz) | fan wind + stepper centering force |
+| game → yoke | `C <severity>` / `B1`·`B0` / `L` | collision jolt / turbo / lap pulse |
+
+> **Force-feedback note:** the stepper is driven as a torque-limited *resistance* (UART `VACTUAL` velocity + run-current modulation), not a servo chasing a center setpoint — that would fight the user on the same shaft. It approximates FFB; real torque control wants a BLDC + FOC. Tuning constants are in the firmware.
 
 ## Modes
 
@@ -57,16 +80,15 @@ Game loop is one-direction with a side-channel for haptics:
    ┌──────────┐      ┌─────────────┐      ┌───────────┐
    │  input/  │─────▶│    game/    │─────▶│  render/  │──▶ canvas
    │ keyboard │      │  state +    │      │  pseudo-  │
-   │  mock    │      │  physics +  │      │  3D + HUD │
+   │  OR yoke │      │  physics +  │      │  3D + HUD │
    └──────────┘      │  road +     │      └───────────┘
-                     │  traffic    │
-                     └──────┬──────┘
-                            │ emits HapticEvent
-                            ▼
-                   ┌────────────────────┐      ┌─────────────────────┐
-                   │  haptics/eventBus  │─────▶│  Iter 2: WebSerial  │
-                   │  (pub-sub)         │      │  to Ghost yoke      │
-                   └────────────────────┘      └─────────────────────┘
+        ▲            │  traffic    │
+        │ I-frames   └──────┬──────┘
+        │                   │ emits HapticEvent + telemetry
+   ┌────┴───────────────────▼──────┐      ┌─────────────────────┐
+   │  serial/ (Web Serial)         │─────▶│  Ghost yoke firmware │
+   │  + haptics/eventBus (pub-sub) │      │  (Arduino R4)        │
+   └───────────────────────────────┘      └─────────────────────┘
 ```
 
 Five subsystems, grouped by directory:
@@ -74,7 +96,8 @@ Five subsystems, grouped by directory:
 - **[`input/`](./src/input/)** — `InputAdapter` interface + keyboard adapter. Holds continuous wheel state, accelerate/brake bool flags. Hardware adapter will implement the same interface; the game loop never branches on input source.
 - **[`game/`](./src/game/)** — flat `GameState`, the 10-step physics integrator, segment-based road generator (lap-closed or endless-windowed), traffic spawn/advance/respawn, shared collision response.
 - **[`render/`](./src/render/)** — pseudo-3D segment projection (Jake Gordon school), HUD, menu, finish screen. Pure read-from-state, no mutation.
-- **[`haptics/`](./src/haptics/)** — generic `HapticBus` pub-sub. Physics emits `collision`, `turbo_start`, `turbo_end`, `off_road`, `curve_load`. Iter 1 wires a console-debug listener; iter 2 will wire a WebSerial writer.
+- **[`haptics/`](./src/haptics/)** — generic `HapticBus` pub-sub. Physics emits `collision`, `turbo_start`, `turbo_end`, `off_road`, `curve_load`, `lap_complete`. A console-debug listener and (iter 2) a WebSerial writer both subscribe.
+- **[`serial/`](./src/serial/)** — Web Serial transport for the Ghost yoke: protocol, port manager. Feeds the WebSerial `InputAdapter` and the haptic/telemetry writer.
 - **[`util/`](./src/util/)** — `mulberry32`/`stringHash` seeded PRNG, `formatLapTime`, shared types.
 
 The `main.ts` / `sketch.ts` boundary: `main.ts` is the Vite entry that mounts the p5 instance; `sketch.ts` owns the p5 lifecycle (`setup` / `draw` / `keyPressed` / `windowResized`) and dispatches per-screen.
@@ -104,7 +127,7 @@ Open the browser console at **Verbose / Debug** log level — events stream ther
 
 ## Next iterations
 
-- **WebSerial hardware adapter** — implement `InputAdapter` against an Arduino-driven rotary encoder + thumb buttons. Game loop is already abstracted, so this is one file.
+- **WebSerial hardware adapter** — ✅ done (iteration 2). See "Hardware controller" above; firmware in [`firmware/ghost-yoke/`](../firmware/ghost-yoke/). Remaining: tune the force-feedback feel on the real rig.
 - **Turbo redesign — power-up pickups + charge meter.** Replace the hold-to-arm turbo with collectable road pickups, an on-screen charge meter, single-key activation, and an active visual effect (screen-edge speed lines / motion blur). Deferred from iter 1 — see chat log for design sketch.
 - **AI ghost driver** — second virtual racer following the player's previous lap line, used for difficulty modeling and the demo "race against your last attempt" experience.
 - **Sound effects + music** — engine RPM, collision impact, curve_load buzz, ambient track.

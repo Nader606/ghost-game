@@ -14,6 +14,10 @@
   </head>
   <body>
     <div id="canvas-host"></div>
+    <!-- Web Serial requires a user gesture to request the port, so connecting
+         the Ghost yoke lives behind this button (iteration 2). The game is fully
+         playable on keyboard without it. -->
+    <button id="connect-controller" type="button">⚙ Connect Controller</button>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
