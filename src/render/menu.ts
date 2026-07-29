@@ -1,4 +1,5 @@
 import type p5 from 'p5';
+import { getTerrain, type TerrainId } from '../game/terrain';
 import { COLORS } from './colors';
 
 export type MenuFocus = 0 | 1;
@@ -13,7 +14,7 @@ const ITEMS: readonly MenuItem[] = [
   { label: 'LAP — 3 LAPS', subtitle: 'timed circuit · best lap recorded' },
 ] as const;
 
-export function drawMenu(p: p5, focus: MenuFocus): void {
+export function drawMenu(p: p5, focus: MenuFocus, terrainId: TerrainId): void {
   p.push();
   p.textAlign(p.CENTER, p.CENTER);
 
@@ -57,6 +58,30 @@ export function drawMenu(p: p5, focus: MenuFocus): void {
     p.text(item.subtitle, p.width / 2, y + buttonH / 2 + 18);
   });
 
+  // Terrain selector — ←/→ cycles. Sits under the mode buttons; the swatch
+  // pair previews the terrain's ground palette, and the subtitle telegraphs
+  // the wheel feel before the player commits.
+  const terrain = getTerrain(terrainId);
+  const selY = startY + totalH + 46;
+  p.fill(COLORS.hudMuted);
+  p.textStyle(p.NORMAL);
+  p.textSize(13);
+  p.text('◀', p.width / 2 - 150, selY);
+  p.text('▶', p.width / 2 + 150, selY);
+  p.fill(COLORS.hudText);
+  p.textStyle(p.BOLD);
+  p.textSize(18);
+  p.text(terrain.name, p.width / 2, selY);
+  p.fill(COLORS.hudMuted);
+  p.textStyle(p.NORMAL);
+  p.textSize(12);
+  p.text(terrain.subtitle, p.width / 2, selY + 22);
+  p.noStroke();
+  p.fill(terrain.grass1);
+  p.rect(p.width / 2 - 118, selY - 7, 14, 14, 3);
+  p.fill(terrain.grass2);
+  p.rect(p.width / 2 + 104, selY - 7, 14, 14, 3);
+
   // Controls hint — appears once on the menu so the player knows the inputs
   // before entering a mode. (In-game these are discoverable, but the first
   // time you load the page you'd otherwise have to guess.)
@@ -67,7 +92,7 @@ export function drawMenu(p: p5, focus: MenuFocus): void {
 
   // Navigation hint
   p.textSize(13);
-  p.text('↑/↓ to focus  ·  Enter to confirm', p.width / 2, p.height - 52);
+  p.text('↑/↓ mode  ·  ←/→ terrain  ·  Enter to confirm', p.width / 2, p.height - 52);
 
   // Academic context — required by CLAUDE.md credits brief.
   p.textSize(11);

@@ -39,6 +39,7 @@ The project pins `p5@^1.11`, not 2.0. p5 1.x stopped getting updates at the end 
 | **Z** held >1 s | Arm + activate turbo (3 s burst)         |
 | **Esc**         | Return to menu (from a race or finish)   |
 | **↑ / ↓**       | Menu / focus toggle                      |
+| **← / →** (menu)| Cycle terrain                            |
 | **Enter**       | Confirm menu choice / retry from finish  |
 | `]`             | *Dev only* — jump 750 m forward (10 % of a lap). Stripped from production builds via `import.meta.env.DEV`. |
 
@@ -63,6 +64,7 @@ The physical controller plugs into the two seams iter 1 left open: the `InputAda
 |-----------|-------|--------|
 | Yoke → game | `I <wheel> <accel> <brake>` | steering + buttons |
 | game → yoke | `T <speed> <lateral> <offroad>` (~30 Hz) | fan wind + stepper centering force |
+| game → yoke | `S <rumble> <resist>` (~1 Hz) | terrain wheel feel (vibration + stiffness) |
 | game → yoke | `C <severity>` / `B1`·`B0` / `L` | collision jolt / turbo / lap pulse |
 
 > **Force-feedback note:** the stepper is driven as a torque-limited *resistance* (UART `VACTUAL` velocity + run-current modulation), not a servo chasing a center setpoint — that would fight the user on the same shaft. It approximates FFB; real torque control wants a BLDC + FOC. Tuning constants are in the firmware.
@@ -71,6 +73,17 @@ The physical controller plugs into the two seams iter 1 left open: the `InputAda
 
 - **Endless** — procedurally generated, open-ended track. Score is distance travelled in km. No fail state; collisions slow you down but don't end the run. Per-run randomised via `Date.now()` seed.
 - **Lap (3 laps)** — fixed seeded circuit. 7.5 km closed loop (750 segments × 10 m), C1-continuous at the wrap by construction (integer-multiple sine frequencies — segment 749 meets segment 0 with no visible kink). Lap timer + best lap. Finish screen on lap 3 with retry / menu.
+
+### Terrains
+
+`←/→` on the menu cycles the surface. Each terrain is a full environment — its own sky gradient, ground/road/wall palette, driving physics, **and wheel feel on the yoke** — all defined in one place, [`game/terrain.ts`](./src/game/terrain.ts). The synthwave effects package (horizon sun, perspective grid, scanlines, bloom) is exclusive to Neon City via the `neonFx` flag; the other terrains render clean. The feel parameters stream to the firmware as the `S` frame, so tuning a terrain never requires a reflash. Dev builds accept a deep link for demos: `?terrain=sand&mode=endless`.
+
+| Terrain | Drives like | Wheel feels like |
+|---------|-------------|------------------|
+| **Neon City** | baseline asphalt | smooth, light |
+| **Gravel Run** | slightly loose | constant buzz |
+| **Desert Dusk** | holds the line, brutal off-road | heavy, stiff |
+| **Glacier** | slides out hard in curves | light, floaty, faint shimmer |
 
 ## Architecture
 

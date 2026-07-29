@@ -1,4 +1,5 @@
 import type { Mode, Screen } from '../util/types';
+import type { TerrainId } from './terrain';
 
 export type TurboState = 'READY' | 'ARMED' | 'ACTIVE' | 'COOLDOWN';
 
@@ -18,6 +19,9 @@ export interface LapRunState {
 export interface GameState {
   screen: Screen;
   mode: Mode;
+  // Menu-selected surface. Deliberately NOT reset by startGame — it's a
+  // persistent preference, like the mode focus, not per-run transient state.
+  terrain: TerrainId;
   playerX: number;
   currentSpeed: number;
   wheel: number;
@@ -35,6 +39,7 @@ export function createInitialState(): GameState {
   return {
     screen: 'menu',
     mode: 'endless',
+    terrain: 'asphalt',
     playerX: 0,
     currentSpeed: 0,
     wheel: 0,

@@ -7,6 +7,7 @@ import { NUM_SEGMENTS_LAP, SEGMENT_LENGTH, updatePhysics } from './game/physics'
 import { buildRoad, lookupSegment, maintainEndlessRoad } from './game/road';
 import type { GameState } from './game/state';
 import { startGame } from './game/state';
+import { cycleTerrain, getTerrain, TERRAINS, type TerrainId } from './game/terrain';
 import { spawnInitialCars, updateTraffic } from './game/traffic';
 import { sendTelemetry } from './haptics/serialOut';
 import { createKeyboardAdapter } from './input/keyboard';
@@ -67,6 +68,16 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
       p.noStroke();
       p.textFont('-apple-system, Segoe UI, Roboto, sans-serif');
       keyboard.start();
+
+      // Dev-only deep link for screenshots/demos: ?terrain=sand&mode=endless
+      // jumps straight into a run. Constant-folded out of production builds.
+      if (import.meta.env.DEV) {
+        const params = new URLSearchParams(globalThis.location.search);
+        const t = params.get('terrain');
+        if (t && TERRAINS.some((x) => x.id === t)) state.terrain = t as TerrainId;
+        const m = params.get('mode');
+        if (m === 'endless' || m === 'lap') enterGame(m);
+      }
     };
 
     p.windowResized = () => {
@@ -76,6 +87,9 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
     const handleMenuKey = (code: number) => {
       if (code === p.UP_ARROW || code === p.DOWN_ARROW) {
         menuFocus = menuFocus === 0 ? 1 : 0;
+        playMenuNav();
+      } else if (code === p.LEFT_ARROW || code === p.RIGHT_ARROW) {
+        state.terrain = cycleTerrain(state.terrain, code === p.LEFT_ARROW ? -1 : 1);
         playMenuNav();
       } else if (code === p.ENTER || code === p.RETURN) {
         playMenuConfirm();
@@ -145,12 +159,15 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
       const dt = Math.min(p.deltaTime / 1000, 1 / 30);
 
       // Sky gradient replaces the old flat p.background(COLORS.bg). Drawn on
-      // every screen so the synthwave look reads from the moment the page loads.
-      drawSky(p);
+      // every screen in the selected terrain's palette — on the menu this makes
+      // the ←/→ terrain cycle a live preview. The NEON effects package (sun,
+      // grid, scanlines, road bloom) is Neon City's identity, gated by neonFx.
+      const terrain = getTerrain(state.terrain);
+      drawSky(p, terrain);
 
       if (state.screen === 'menu') {
-        drawMenu(p, menuFocus);
-        if (perfFlags.scanlines) drawScanlines(p, dt);
+        drawMenu(p, menuFocus, state.terrain);
+        if (perfFlags.scanlines && terrain.neonFx) drawScanlines(p, dt);
         return;
       }
 
@@ -184,15 +201,16 @@ export function buildSketch(state: GameState, serial: GhostSerial): (p: p5) => v
       if (road) renderWorld(p, state, road, cars);
       if (state.screen === 'game') drawHUD(p, state, dt);
       else if (state.screen === 'finish') drawFinishScreen(p, state);
-      if (perfFlags.scanlines) drawScanlines(p, dt);
+      if (perfFlags.scanlines && terrain.neonFx) drawScanlines(p, dt);
     };
   };
 }
 
 function renderWorld(p: p5, state: GameState, road: Road, cars: TrafficCar[]): void {
-  if (perfFlags.sun) drawSun(p, state);
+  const neonFx = getTerrain(state.terrain).neonFx;
+  if (perfFlags.sun && neonFx) drawSun(p, state);
   renderRoad(p, state, road, cars);
-  if (perfFlags.grid) drawGrid(p, state, road);
+  if (perfFlags.grid && neonFx) drawGrid(p, state, road);
   drawPlayerCar(p);
   if (perfFlags.particles) drawParticles(p);
   if (perfFlags.speedLines) drawSpeedLines(state, p);

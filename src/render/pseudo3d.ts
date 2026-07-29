@@ -10,6 +10,7 @@ import {
 } from '../game/physics';
 import { lookupSegment } from '../game/road';
 import type { GameState } from '../game/state';
+import { getTerrain, type Terrain } from '../game/terrain';
 import type { ProjectedPoint, Road, Segment, TrafficCar, WallCorners } from '../util/types';
 import { drawTrafficCar } from './car';
 import { COLORS, NEON } from './colors';
@@ -107,6 +108,7 @@ function drawWallTrapezoid(p: p5, c: WallCorners, fill: string, border: string):
 }
 
 export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar[]): void {
+  const terrain = getTerrain(state.terrain);
   const baseIndex = state.playerSegmentIndex;
   const baseSegment = lookupSegment(road, baseIndex);
   const playerPercent = ((state.playerZ % SEGMENT_LENGTH) + SEGMENT_LENGTH) % SEGMENT_LENGTH;
@@ -157,8 +159,10 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
     if (p2.screenY >= maxY) continue;
     if (p2.screenW < 1) break;
 
-    const bloomEnabled = n < BLOOM_MAX_SEGMENT_DISTANCE;
-    drawSegmentQuad(p, p1, p2, seg, bloomEnabled);
+    // Bloom is part of the NEON package — non-neon terrains draw the same
+    // geometry with no halo (also a free perf win on those tracks).
+    const bloomEnabled = n < BLOOM_MAX_SEGMENT_DISTANCE && terrain.neonFx;
+    drawSegmentQuad(p, p1, p2, seg, bloomEnabled, terrain);
 
     // Walls bend with the road because they reuse the same nearOffsetX /
     // farOffsetX as the segment quad. Drawing walls AFTER the road quad and
@@ -196,7 +200,7 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
         NEON.hotPink,
         WALL_BLOOM_BLUR,
         () => {
-          drawWallTrapezoid(p, leftWall, COLORS.wallLeft, COLORS.wallBorder);
+          drawWallTrapezoid(p, leftWall, terrain.wallLeft, COLORS.wallBorder);
         },
         bloomEnabled,
       );
@@ -207,7 +211,7 @@ export function renderRoad(p: p5, state: GameState, road: Road, cars: TrafficCar
         NEON.cyan,
         WALL_BLOOM_BLUR,
         () => {
-          drawWallTrapezoid(p, rightWall, COLORS.wallRight, COLORS.wallBorder);
+          drawWallTrapezoid(p, rightWall, terrain.wallRight, COLORS.wallBorder);
         },
         bloomEnabled,
       );
@@ -248,13 +252,14 @@ function drawSegmentQuad(
   far: ProjectedPoint,
   seg: Segment,
   bloomEnabled: boolean,
+  terrain: Terrain,
 ): void {
   p.noStroke();
 
-  // 1. Grass — full-width band from the far edge down to the near edge of this
-  //    segment. Successive segments stack upward toward the horizon; the bg
-  //    fill above the topmost grass band shows through as sky.
-  p.fill(seg.index % 2 === 0 ? COLORS.grass1 : COLORS.grass2);
+  // 1. Ground — full-width band from the far edge down to the near edge of this
+  //    segment, in the selected terrain's palette. Successive segments stack
+  //    upward toward the horizon; the bg fill above the topmost band is sky.
+  p.fill(seg.index % 2 === 0 ? terrain.grass1 : terrain.grass2);
   p.beginShape();
   p.vertex(0, far.screenY);
   p.vertex(p.width, far.screenY);
@@ -263,11 +268,12 @@ function drawSegmentQuad(
   p.endShape(p.CLOSE);
 
   // 2. Road surface (zebra-striped via seg.color; segment 0 is the start/
-  // finish line, painted bright white so the wrap is unmistakable).
+  // finish line, painted bright white so the wrap is unmistakable). Surface
+  // tint comes from the terrain — warm asphalt in the desert, blued ice, etc.
   if (seg.index === 0) {
     p.fill(COLORS.startFinish);
   } else {
-    p.fill(seg.color === 'light' ? COLORS.road1 : COLORS.road2);
+    p.fill(seg.color === 'light' ? terrain.road1 : terrain.road2);
   }
   p.beginShape();
   p.vertex(near.screenX - near.screenW, near.screenY);

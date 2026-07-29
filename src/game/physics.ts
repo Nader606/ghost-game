@@ -7,6 +7,7 @@ import { HapticBus } from '../haptics/eventBus';
 import type { InputState } from '../input/input';
 import { applyCollision } from './collisions';
 import type { GameState } from './state';
+import { getTerrain } from './terrain';
 
 export const TOP_SPEED_KMH = 300;
 export const TOP_SPEED = TOP_SPEED_KMH / 3.6; // m/s, ≈ 83.33
@@ -99,6 +100,10 @@ export function updatePhysics(
   // the keyboard adapter; hardware will write wheel directly).
   state.wheel = input.wheel;
 
+  // Terrain modifiers — scale the asphalt-baseline constants. Looked up once
+  // per frame; the same terrain also drives the palette and the wheel feel.
+  const terrain = getTerrain(state.terrain);
+
   // Step 2: speed update.
   // 2a: turbo state machine — may transition states and emit events.
   updateTurbo(state, input.accelerate, dt);
@@ -120,7 +125,8 @@ export function updatePhysics(
   // continuous "scraping the wall" haptic still ships via the 10 Hz off_road
   // event (step 7), unchanged.
   if (Math.abs(state.playerX) > 1) {
-    state.currentSpeed -= OFF_ROAD_DRAG * (state.currentSpeed / TOP_SPEED) * dt;
+    state.currentSpeed -=
+      OFF_ROAD_DRAG * terrain.offRoadDragMul * (state.currentSpeed / TOP_SPEED) * dt;
   }
 
   // 2d: clamp speed to [0, currentMaxSpeed]. On ACTIVE → COOLDOWN edges the
@@ -149,7 +155,15 @@ export function updatePhysics(
   // No clamp. v² reflects real physics; at turbo speed centripetal is ~2×
   // stronger, so curves bite harder. Counter-steer authority is 1.5/s at top
   // speed — ~10× a 0.3-curve's drift, so the player has to work but can hold.
-  state.playerX -= currentCurve * speedNormalized * speedNormalized * CENTRIPETAL_FACTOR * dt;
+  // centripetalMul is the terrain grip: >1 (ice) slides out harder, <1 (sand)
+  // holds the line but pays for it in wheel weight.
+  state.playerX -=
+    currentCurve *
+    speedNormalized *
+    speedNormalized *
+    CENTRIPETAL_FACTOR *
+    terrain.centripetalMul *
+    dt;
 
   // Step 5: wall collision. Leading-edge gating ensures one `collision` event
   // per impact — sustained contact (centripetal pinning into a curve's outer

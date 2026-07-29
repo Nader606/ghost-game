@@ -8,8 +8,15 @@
 
 import { TOP_SPEED } from '../game/physics';
 import type { GameState } from '../game/state';
+import { getTerrain } from '../game/terrain';
 import type { GhostSerial } from '../serial/ghostSerial';
-import { encodeCollision, encodeLap, encodeTelemetry, encodeTurbo } from '../serial/protocol';
+import {
+  encodeCollision,
+  encodeLap,
+  encodeSurface,
+  encodeTelemetry,
+  encodeTurbo,
+} from '../serial/protocol';
 import { HapticBus } from './eventBus';
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -18,6 +25,11 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 // link well clear of saturation at 115200 baud.
 const TELEMETRY_INTERVAL_MS = 33;
 let lastTelemetryMs = -Infinity;
+
+// Surface (terrain feel) rides its own slow cadence: 1 Hz is idempotent
+// state-sync, so a reconnect or a corrupted line self-heals within a second.
+const SURFACE_INTERVAL_MS = 1000;
+let lastSurfaceMs = -Infinity;
 
 // Register the discrete-event listener. Returns an unsubscribe for symmetry,
 // though iter-2 keeps it attached for the page lifetime.
@@ -50,6 +62,12 @@ export function sendTelemetry(serial: GhostSerial, state: GameState, curve: numb
   const now = performance.now();
   if (now - lastTelemetryMs < TELEMETRY_INTERVAL_MS) return;
   lastTelemetryMs = now;
+
+  if (now - lastSurfaceMs >= SURFACE_INTERVAL_MS) {
+    lastSurfaceMs = now;
+    const terrain = getTerrain(state.terrain);
+    serial.write(encodeSurface(terrain.wheelRumble, terrain.wheelResist));
+  }
 
   const speedNorm = state.currentSpeed / TOP_SPEED;
   // Signed curve load = curve · v² (same shape as the physics centripetal term).

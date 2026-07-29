@@ -43,6 +43,15 @@ export function encodeLap(): string {
   return 'L\n';
 }
 
+// Surface feel — terrain baseline for the wheel: continuous rumble amplitude
+// (firmware scales it by speed) and steering resistance (stepper holding
+// current). Re-sent at ~1 Hz so a mid-game reconnect or a dropped line still
+// converges on the right feel. Terrain definitions live in game/terrain.ts;
+// the firmware just renders whatever arrives.
+export function encodeSurface(rumble01: number, resist01: number): string {
+  return `S ${toMilli(rumble01, 0, 1)} ${toMilli(resist01, 0, 1)}\n`;
+}
+
 // ── Arduino → Browser (input) ───────────────────────────────────────────────
 
 export interface ParsedInput {

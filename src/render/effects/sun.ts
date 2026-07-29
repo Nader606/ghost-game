@@ -1,27 +1,29 @@
-// Synthwave sky gradient + horizon sun. Replaces the flat p.background(COLORS.bg)
-// call as the first thing drawn each frame. Sun is drawn only when the game has
-// road state (game / finish screens); menu gets the gradient alone.
+// Sky gradient + horizon sun. Replaces the flat p.background(COLORS.bg) call as
+// the first thing drawn each frame. The gradient stops come from the selected
+// terrain, so each environment owns its sky (Neon City keeps the synthwave
+// purples; the sun itself is Neon City-only, gated by terrain.neonFx at the
+// call site). Menu gets the gradient alone — a live preview of the selection.
 
 import type p5 from 'p5';
 import type { GameState } from '../../game/state';
-import { COLORS, NEON } from '../colors';
+import type { Terrain } from '../../game/terrain';
+import { NEON } from '../colors';
 
 // 3-stop vertical gradient covering ONLY the top half of the canvas (above
-// the horizon). The bottom half is filled with COLORS.bg so wall geometry
-// drawn in gaps between grass bands renders against the same dark colour it
-// did pre-NEON — without this, the gradient's NEON.black bottom + the
-// grass-band edges created a visible seam at the horizon and made walls
-// look detached from the road plane.
-export function drawSky(p: p5): void {
+// the horizon). The bottom half is filled with the terrain's `below` colour so
+// wall geometry drawn in gaps between grass bands renders against a matching
+// dark tone — a mismatched fill there creates a visible seam at the horizon
+// and makes walls look detached from the road plane.
+export function drawSky(p: p5, terrain: Terrain): void {
   const ctx = p.drawingContext as CanvasRenderingContext2D;
   const horizonY = p.height / 2;
   const gradient = ctx.createLinearGradient(0, 0, 0, horizonY);
-  gradient.addColorStop(0, NEON.purple);
-  gradient.addColorStop(0.5, NEON.deepPurple);
-  gradient.addColorStop(1, NEON.black);
+  gradient.addColorStop(0, terrain.sky.top);
+  gradient.addColorStop(0.5, terrain.sky.mid);
+  gradient.addColorStop(1, terrain.sky.horizon);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, p.width, horizonY);
-  ctx.fillStyle = COLORS.bg;
+  ctx.fillStyle = terrain.sky.below;
   ctx.fillRect(0, horizonY, p.width, p.height - horizonY);
 }
 
