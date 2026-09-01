@@ -53,6 +53,10 @@ The physical controller plugs into the two seams iter 1 left open: the `InputAda
 
 **Hardware:** Arduino UNO R4 Minima · AS5600 magnetic encoder (steering) · NEMA 17 stepper + TMC2209 driver (force-feedback wheel) · 2× DC blower fans + XY-MOS (wind) · two thumb buttons (accelerate / brake). Firmware, the full pin map, and **wiring diagrams (SVG + PDF, one per component)** live in [`firmware/ghost-yoke/`](../firmware/ghost-yoke/) and [`firmware/ghost-yoke/wiring/`](../firmware/ghost-yoke/wiring/).
 
+![The Ghost yoke hardware laid out on the bench: 3D-printed yoke plates and encoder mount, NEMA 17 stepper with shaft coupler, the two blower fans on their driver mount, the AS5600 encoder board, and the breadboard prototype wiring](./docs/hardware-prototype.jpg)
+
+*Bench build-up, iteration 2: 3D-printed yoke plate + encoder mount (front left), NEMA 17 stepper with its shaft coupler, the twin blower fans on the wind mount, the AS5600 breakout (far right), and the breadboard carrying the driver wiring.*
+
 **Browser-side code** ([`src/serial/`](./src/serial/), [`src/input/webserial.ts`](./src/input/webserial.ts), [`src/haptics/serialOut.ts`](./src/haptics/serialOut.ts)):
 
 - **[`serial/protocol.ts`](./src/serial/protocol.ts)** — line-based ASCII wire protocol (the single source of truth, mirrored in the firmware's `Protocol.h`), plus the load-bearing left/right sign convention.
